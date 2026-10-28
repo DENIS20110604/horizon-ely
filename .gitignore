@@ -7,3 +7,11 @@ logs/
 *.jar
 .local/
 minecraft/
+/assets/
+# What a game run leaves in the folder it was started from.
+.horizon-cache/
+saves/
+options.txt
+horizon-player.txt
+horizon-graphics.txt
+horizon-extras.txt
