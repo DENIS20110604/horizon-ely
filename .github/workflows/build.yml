@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          read -r ref sha < upstream.txt
+          read -r ref sha < <(grep -v '^[[:space:]]*#' upstream.txt | grep -v '^[[:space:]]*$' | head -1)
           version=$(tr -d '[:space:]' < version.txt)
           echo "HORIZON_LAUNCHER_VERSION=$version" >> "$GITHUB_ENV"
           git clone --depth 1 --branch "$ref" https://github.com/horizon-rust/horizon.git .work/upstream

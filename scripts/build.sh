@@ -10,7 +10,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-read -r ref sha <"$root/upstream.txt"
+read -r ref sha <<<"$(grep -v '^[[:space:]]*#' "$root/upstream.txt" | grep -v '^[[:space:]]*$' | head -1)"
 version=$(tr -d '[:space:]' <"$root/version.txt")
 work=${WORK:-$root/.work}
 src=$work/upstream
