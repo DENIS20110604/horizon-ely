@@ -64,6 +64,8 @@ jobs:
           read -r ref sha < <(grep -v '^[[:space:]]*#' upstream.txt | grep -v '^[[:space:]]*$' | head -1)
           version=$(grep -v '^[[:space:]]*#' version.txt | grep -v '^[[:space:]]*$' | head -1)
           echo "HORIZON_LAUNCHER_VERSION=$version" >> "$GITHUB_ENV"
+          # rust-cache restores the target folder, and with it the folders above it.
+          rm -rf .work/upstream
           git clone --depth 1 --branch "$ref" https://github.com/horizon-rust/horizon.git .work/upstream
           cd .work/upstream
           test "$(git rev-parse HEAD)" = "$sha" || {
