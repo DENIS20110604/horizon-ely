@@ -1,4 +1,4 @@
-From 1a4f8ed7d302b5af2e698bb308befa1f78276104 Mon Sep 17 00:00:00 2001
+From c8995612c9c117cafd64f0853d0ff71069419d88 Mon Sep 17 00:00:00 2001
 From: DENIS20110604 <akount.den11@gmail.com>
 Date: Wed, 28 Oct 2026 18:48:07 +0200
 Subject: [PATCH] Offline play and Ely.by accounts
@@ -8,34 +8,68 @@ Subject: [PATCH] Offline play and Ely.by accounts
 - ely_proxy.rs: loopback discovery document forwarding join/verify/profile
 - self-update off (the official update would restore the gate)
 ---
- crates/horizon-client/src/game/remote.rs |   7 +
- crates/horizon-client/src/skins.rs       | 132 +++++++-
- docs/launcher-commands.md                |  30 +-
- launcher/lang/fr.json                    |  20 +-
- launcher/lang/ru.json                    |  21 +-
- launcher/src/account.rs                  | 152 +++++++--
- launcher/src/account/tests.rs            |  54 ++--
- launcher/src/backend.rs                  | 108 ++++---
- launcher/src/cli.rs                      |  94 +++++-
- launcher/src/ely.rs                      | 376 +++++++++++++++++++++++
- launcher/src/ely_proxy.rs                | 234 ++++++++++++++
- launcher/src/lib.rs                      |   2 +
- launcher/src/main.rs                     | 140 +++++++--
- launcher/src/owner_page.rs               |  10 +-
- launcher/src/servers_page.rs             |  22 +-
- launcher/src/switch_page.rs              |  19 +-
- launcher/tests/owner_gate.rs             |  18 +-
- 17 files changed, 1265 insertions(+), 174 deletions(-)
+ crates/horizon-client/src/game/perspective.rs |  19 +
+ crates/horizon-client/src/game/remote.rs      |   9 +-
+ crates/horizon-client/src/skins.rs            | 132 +++++-
+ docs/launcher-commands.md                     |  30 +-
+ launcher/lang/fr.json                         |  20 +-
+ launcher/lang/ru.json                         |  21 +-
+ launcher/src/account.rs                       | 152 ++++++-
+ launcher/src/account/tests.rs                 |  54 ++-
+ launcher/src/backend.rs                       | 108 +++--
+ launcher/src/cli.rs                           |  94 ++++-
+ launcher/src/ely.rs                           | 386 ++++++++++++++++++
+ launcher/src/ely_proxy.rs                     | 234 +++++++++++
+ launcher/src/lib.rs                           |   2 +
+ launcher/src/main.rs                          | 140 ++++++-
+ launcher/src/owner_page.rs                    |  10 +-
+ launcher/src/servers_page.rs                  |  22 +-
+ launcher/src/switch_page.rs                   |  19 +-
+ launcher/tests/owner_gate.rs                  |  18 +-
+ 18 files changed, 1295 insertions(+), 175 deletions(-)
  create mode 100644 launcher/src/ely.rs
  create mode 100644 launcher/src/ely_proxy.rs
 
+diff --git a/crates/horizon-client/src/game/perspective.rs b/crates/horizon-client/src/game/perspective.rs
+index 9eb5633..bd2577b 100644
+--- a/crates/horizon-client/src/game/perspective.rs
++++ b/crates/horizon-client/src/game/perspective.rs
+@@ -321,6 +321,25 @@ impl Game<'_> {
+             };
+             self.player_model = Some(Mob::new(0, kind, p.position, self.yaw));
+         }
++        // Patched: the local player's skin in a local world (single player, LAN). There is no
++        // remote connection to resolve it from there, so it is the account's own profile
++        // (Ely.by, fetched through the launcher's proxy) or the launcher's offline skin.
++        if self.remote.is_none() {
++            if let Some(textures) = self.own_textures() {
++                let skin = {
++                    let mut downloads = self.skin_downloads.borrow_mut();
++                    horizon_client::skins::lookup(&textures, false, |kind, url| {
++                        downloads.state(kind, url)
++                    })
++                };
++                if let Some(m) = self.player_model.as_mut() {
++                    if let Some(skin) = skin {
++                        m.skin = Some(skin);
++                        m.slim = textures.slim;
++                    }
++                }
++            }
++        }
+         let crouching = p.pose == Pose::Crouching;
+         let (position, flying) = (p.position, p.flying || p.fall_flying);
+         let (fall_flying, fly_ticks, velocity) = (p.fall_flying, p.fall_fly_ticks, p.velocity);
 diff --git a/crates/horizon-client/src/game/remote.rs b/crates/horizon-client/src/game/remote.rs
-index 22b7c13..e47d206 100644
+index 22b7c13..b347d9b 100644
 --- a/crates/horizon-client/src/game/remote.rs
 +++ b/crates/horizon-client/src/game/remote.rs
-@@ -3090,6 +3090,13 @@ impl Game<'_> {
+@@ -3088,8 +3088,15 @@ impl Game<'_> {
+         Some((players, r.online_mode, upside_down))
+     }
      /// The signed-in account's `textures`, once the services answered.
-     fn own_textures(&self) -> Option<horizon_client::skins::Textures> {
+-    fn own_textures(&self) -> Option<horizon_client::skins::Textures> {
++    pub(super) fn own_textures(&self) -> Option<horizon_client::skins::Textures> {
          use horizon_client::skins::{self, NameOrId, Resolve};
 +        // Patched: an offline name's skin comes from the launcher's variables: there is no
 +        // account to ask the services about.
@@ -1091,10 +1125,10 @@ index 7d71084..6bdbeb5 100644
                  .offline
 diff --git a/launcher/src/ely.rs b/launcher/src/ely.rs
 new file mode 100644
-index 0000000..69ddeca
+index 0000000..5860981
 --- /dev/null
 +++ b/launcher/src/ely.rs
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,386 @@
 +//! Ely.by, and any other authlib (Yggdrasil) server: signing in for the account the game then
 +//! plays with. authlib-injector does this to the Java game at launch; Horizon is native, so the
 +//! launcher signs in itself, keeps the tokens in the OS keychain (never the password) and hands
@@ -1412,7 +1446,7 @@ index 0000000..69ddeca
 +        return String::new();
 +    };
 +    let labels: Vec<&str> = host.split('.').collect();
-+    let mut domains = vec![host];
++    let mut domains = vec![host.clone()];
 +    if labels.len() >= 3 {
 +        domains.push(labels[1..].join("."));
 +    }
@@ -1469,6 +1503,16 @@ index 0000000..69ddeca
 +            .as_deref(),
 +            Some(TWO_FACTOR_HELP)
 +        );
++    }
++
++    #[test]
++    fn skin_domains_cover_the_server_and_the_domain_above_it() {
++        assert_eq!(
++            skin_domains("https://authserver.ely.by"),
++            "authserver.ely.by,ely.by"
++        );
++        assert_eq!(skin_domains("https://ely.by/"), "ely.by");
++        assert_eq!(skin_domains(""), "");
 +    }
 +}
 diff --git a/launcher/src/ely_proxy.rs b/launcher/src/ely_proxy.rs
