@@ -4,7 +4,7 @@ Copyright (c) 2026 DENIS20110604 (this patch series: patches/, scripts/, .github
 
 The patches modify Horizon, which is MIT licensed:
 
-Copyright (c) 2026 Ludovic (https://github.com/horizon-rust/horizon)
+Copyright (c) 2026 Ludovic Marie and the Horizon contributors (https://github.com/horizon-rust/horizon)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

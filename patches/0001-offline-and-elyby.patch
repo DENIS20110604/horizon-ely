@@ -1,4 +1,4 @@
-From a050b88c18dffe7eeccabbbe16b18ee7a2373f56 Mon Sep 17 00:00:00 2001
+From f6b52ad4dc6212464d5abd831882612e8322499b Mon Sep 17 00:00:00 2001
 From: DENIS20110604 <akount.den11@gmail.com>
 Date: Wed, 28 Oct 2026 18:48:07 +0200
 Subject: [PATCH] Offline play and Ely.by accounts
@@ -8,23 +8,92 @@ Subject: [PATCH] Offline play and Ely.by accounts
 - ely_proxy.rs: loopback discovery document forwarding join/verify/profile
 - self-update off (the official update would restore the gate)
 ---
- launcher/lang/fr.json         |  20 ++-
- launcher/lang/ru.json         |  21 ++-
- launcher/src/account.rs       | 134 ++++++++++++--
- launcher/src/account/tests.rs |  54 ++++--
- launcher/src/backend.rs       | 103 +++++------
- launcher/src/cli.rs           |  91 ++++++++--
- launcher/src/ely.rs           | 330 ++++++++++++++++++++++++++++++++++
- launcher/src/ely_proxy.rs     | 234 ++++++++++++++++++++++++
+ docs/launcher-commands.md     |  30 ++-
+ launcher/lang/fr.json         |  20 +-
+ launcher/lang/ru.json         |  21 +-
+ launcher/src/account.rs       | 152 ++++++++++++--
+ launcher/src/account/tests.rs |  54 +++--
+ launcher/src/backend.rs       | 103 +++++-----
+ launcher/src/cli.rs           |  94 +++++++--
+ launcher/src/ely.rs           | 361 ++++++++++++++++++++++++++++++++++
+ launcher/src/ely_proxy.rs     | 234 ++++++++++++++++++++++
  launcher/src/lib.rs           |   2 +
- launcher/src/main.rs          | 140 ++++++++++++---
+ launcher/src/main.rs          | 140 +++++++++++--
  launcher/src/owner_page.rs    |  10 +-
  launcher/src/servers_page.rs  |  22 ++-
  launcher/src/switch_page.rs   |  19 +-
- 13 files changed, 1028 insertions(+), 152 deletions(-)
+ launcher/tests/owner_gate.rs  |  18 +-
+ 15 files changed, 1115 insertions(+), 165 deletions(-)
  create mode 100644 launcher/src/ely.rs
  create mode 100644 launcher/src/ely_proxy.rs
 
+diff --git a/docs/launcher-commands.md b/docs/launcher-commands.md
+index d5ed349..2e6a493 100644
+--- a/docs/launcher-commands.md
++++ b/docs/launcher-commands.md
+@@ -41,13 +41,13 @@ Prepare a version's resources from your own Minecraft install, or from Mojang.
+     horizon-launcher prepare
+ 
+ - `--minecraft`: The game folder of the official launcher, Prism Launcher, MultiMC, the Modrinth App, ATLauncher or GDLauncher (default: the launcher's, then every launcher's default)
+-- `--download`: Download Minecraft from Mojang for the signed-in account that owns it, instead of using an install
++- `--download`: Download Minecraft from Mojang instead of using an install
+ 
+ MCP: `prepare`.
+ 
+ ## `horizon-launcher play`
+ 
+-Start the client (needs a signed-in Microsoft account that owns Minecraft: Java Edition).
++Start the client (it plays as the selected account, offline name, or the game's own name).
+ 
+     horizon-launcher play
+ 
+@@ -99,7 +99,7 @@ MCP: `account_list`.
+ 
+ ## `horizon-launcher account sign-in`
+ 
+-Sign in with a Microsoft account in your browser (device code). Play needs one that owns Minecraft: Java Edition.
++Sign in with a Microsoft account in your browser (device code). Optional: it plays online servers with your name and skin.
+ 
+     horizon-launcher account sign-in
+ 
+@@ -127,7 +127,7 @@ MCP: `account_select`.
+ 
+ ## `horizon-launcher account offline`
+ 
+-Play offline (LAN, offline-mode servers) beside a signed-in account that owns the game: as NAME (kept to switch back to; 3 to 16 letters, digits or _), or as the name the game made up.
++Play offline (LAN, offline-mode servers): as NAME (kept to switch back to; 3 to 16 letters, digits or _), or as the name the game made up.
+ 
+     horizon-launcher account offline [NAME]
+ 
+@@ -160,6 +160,28 @@ Show or set an offline name's skin and cape: a 64x64 (or 64x32) skin PNG, a 64x3
+ 
+ MCP: `account_skin`.
+ 
++## `horizon-launcher account ely login`
++
++Sign in; the password is read from the terminal, never from the command line.
++
++    horizon-launcher account ely login --user <USER>
++
++- `--server`: The authlib server (Ely.by's own by default)
++- `--user`: The name or e-mail the server knows
++- `--code`: The two-factor code, when the account has one on
++
++MCP: `account_ely_login`.
++
++## `horizon-launcher account ely sign-out`
++
++Sign out: the account's tokens leave the keychain.
++
++    horizon-launcher account ely sign-out <WHO>
++
++- `WHO`: Its name or UUID
++
++MCP: `account_ely_sign_out`.
++
+ ## `horizon-launcher settings`
+ 
+ Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape).
 diff --git a/launcher/lang/fr.json b/launcher/lang/fr.json
 index a853249..7ec0e4f 100644
 --- a/launcher/lang/fr.json
@@ -99,7 +168,7 @@ index 9fa58b9..24aeed9 100644
 +  "This account has two-factor authentication: enter the code from your app in the 2FA field and sign in again.": "У аккаунта включена двухфакторная аутентификация: введите код из приложения в поле 2FA и войдите снова."
  }
 diff --git a/launcher/src/account.rs b/launcher/src/account.rs
-index 6f6ae39..ee62b62 100644
+index 6f6ae39..519b4ee 100644
 --- a/launcher/src/account.rs
 +++ b/launcher/src/account.rs
 @@ -403,6 +403,10 @@ pub struct Account {
@@ -121,7 +190,7 @@ index 6f6ae39..ee62b62 100644
      }))
  }
  
-@@ -468,6 +473,55 @@ impl std::fmt::Debug for Secrets {
+@@ -468,6 +473,72 @@ impl std::fmt::Debug for Secrets {
      }
  }
  
@@ -153,12 +222,19 @@ index 6f6ae39..ee62b62 100644
 +    }
 +}
 +
-+/// The authlib tokens an account keeps in `store`, if it still has them there.
++/// The authlib tokens an account keeps: in the keychain, or — on a desktop with no Secret Service
++/// (a bare Wayland session, say) — in a private file only its owner can read, so an Ely.by sign-in
++/// survives a launcher restart either way.
 +pub fn authlib_secrets_in(store: &dyn SecretStore, uuid: &str) -> Option<AuthlibSecrets> {
-+    store
-+        .get(uuid)
++    if store.persistent() {
++        return store
++            .get(uuid)
++            .ok()
++            .flatten()
++            .and_then(|s| serde_json::from_str(&s).ok());
++    }
++    std::fs::read_to_string(crate::ely::token_file(uuid))
 +        .ok()
-+        .flatten()
 +        .and_then(|s| serde_json::from_str(&s).ok())
 +}
 +
@@ -168,16 +244,26 @@ index 6f6ae39..ee62b62 100644
 +    uuid: &str,
 +    secrets: &AuthlibSecrets,
 +) -> Result<(), String> {
-+    store.set(
-+        uuid,
-+        &serde_json::to_string(secrets).map_err(|e| e.to_string())?,
-+    )
++    let text = serde_json::to_string(secrets).map_err(|e| e.to_string())?;
++    if store.persistent() {
++        store.set(uuid, &text)
++    } else {
++        crate::ely::keep_token_file(uuid, &text)
++    }
++}
++
++/// Drop an authlib account's tokens wherever they are (`Accounts::remove`).
++pub fn forget_authlib_secrets(store: &dyn SecretStore, uuid: &str) {
++    if store.persistent() {
++        let _ = store.delete(uuid);
++    }
++    crate::ely::forget_token_file(uuid);
 +}
 +
  /// From Microsoft tokens to a ready account: Xbox, XSTS, Minecraft, ownership, profile.
  pub fn finish_sign_in(ep: &Endpoints, ms: MsTokens) -> Result<(Account, Secrets), String> {
      let mc = minecraft_login(ep, &ms.access)?;
-@@ -784,9 +838,6 @@ pub enum Player {
+@@ -784,9 +855,6 @@ pub enum Player {
      GameName,
  }
  
@@ -187,7 +273,7 @@ index 6f6ae39..ee62b62 100644
  /// The secrets an account keeps in `store`, if it still has them there.
  fn secrets_in(store: &dyn SecretStore, uuid: &str) -> Option<Secrets> {
      store
-@@ -849,8 +900,23 @@ impl Accounts {
+@@ -849,8 +917,23 @@ impl Accounts {
          }
          Ok(())
      }
@@ -212,7 +298,7 @@ index 6f6ae39..ee62b62 100644
      pub fn has_owner(&self, store: &dyn SecretStore) -> bool {
          self.accounts
              .iter()
-@@ -866,9 +932,8 @@ impl Accounts {
+@@ -866,9 +949,8 @@ impl Accounts {
          }
      }
  
@@ -224,7 +310,7 @@ index 6f6ae39..ee62b62 100644
          match who {
              Player::Microsoft(uuid) => {
                  if !self.accounts.iter().any(|a| a.uuid == uuid) {
-@@ -877,9 +942,6 @@ impl Accounts {
+@@ -877,9 +959,6 @@ impl Accounts {
                  self.selected = Some(uuid);
              }
              Player::Offline(name) => {
@@ -234,7 +320,15 @@ index 6f6ae39..ee62b62 100644
                  let name = self.add_offline(&name)?;
                  self.selected = None;
                  self.offline_selected = Some(name);
-@@ -990,10 +1052,14 @@ pub struct Launch {
+@@ -960,6 +1039,7 @@ impl Accounts {
+     /// play only once an account that owns the game is back.
+     pub fn remove(&mut self, store: &dyn SecretStore, uuid: &str) -> Result<(), String> {
+         store.delete(uuid)?;
++        forget_authlib_secrets(store, uuid);
+         self.accounts.retain(|a| a.uuid != uuid);
+         if self.selected.as_deref() == Some(uuid) {
+             self.selected = None;
+@@ -990,10 +1070,14 @@ pub struct Launch {
      pub owner: Option<(Account, Secrets)>,
  }
  
@@ -253,7 +347,7 @@ index 6f6ae39..ee62b62 100644
  /// The caller saves `accounts` (renewed names and skins).
  pub fn launch(
      ep: &Endpoints,
-@@ -1011,6 +1077,31 @@ pub fn launch(
+@@ -1011,6 +1095,31 @@ pub fn launch(
              break;
          }
          let plays = Some(&account.uuid) == selected.as_ref();
@@ -285,7 +379,7 @@ index 6f6ae39..ee62b62 100644
          let Some(secrets) = secrets_in(store, &account.uuid) else {
              if plays {
                  pass.offline = Some(format!(
-@@ -1045,11 +1136,9 @@ pub fn launch(
+@@ -1045,11 +1154,9 @@ pub fn launch(
              }
          }
      }
@@ -300,7 +394,7 @@ index 6f6ae39..ee62b62 100644
  }
  
  /// Write the session for the game, readable by this user only, in a fresh file it deletes
-@@ -1164,5 +1253,12 @@ pub fn session_for_game(game_home: &Path) -> Result<(Option<PathBuf>, Option<Str
+@@ -1164,5 +1271,12 @@ pub fn session_for_game(game_home: &Path) -> Result<(Option<PathBuf>, Option<Str
      }
  }
  
@@ -628,7 +722,7 @@ index 4e2a1b1..ced73e7 100644
      /// file (none = offline) and why it plays offline, if it does.
      Session(Result<(Option<PathBuf>, Option<String>), crate::account::NoOwner>),
 diff --git a/launcher/src/cli.rs b/launcher/src/cli.rs
-index 7d71084..65cabea 100644
+index 7d71084..6bdbeb5 100644
 --- a/launcher/src/cli.rs
 +++ b/launcher/src/cli.rs
 @@ -3,6 +3,7 @@
@@ -695,7 +789,16 @@ index 7d71084..65cabea 100644
  }
  
  #[derive(Subcommand)]
-@@ -562,7 +588,7 @@ enum Cmd {
+@@ -554,15 +580,14 @@ enum Cmd {
+         /// ATLauncher or GDLauncher (default: the launcher's, then every launcher's default)
+         #[arg(long, conflicts_with = "download")]
+         minecraft: Option<PathBuf>,
+-        /// Download Minecraft from Mojang for the signed-in account that owns it, instead of
+-        /// using an install
++        /// Download Minecraft from Mojang instead of using an install
+         #[arg(long)]
+         download: bool,
+         /// The installed version (default: the selected one)
          #[arg(long)]
          version: Option<String>,
      },
@@ -704,7 +807,7 @@ index 7d71084..65cabea 100644
      Play {
          #[arg(long)]
          version: Option<String>,
-@@ -1320,6 +1346,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
+@@ -1320,6 +1345,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                  json(serde_json::json!({
                      "accounts": accounts.accounts.iter().map(|a| serde_json::json!({
                          "name": a.name, "uuid": a.uuid,
@@ -712,7 +815,7 @@ index 7d71084..65cabea 100644
                          "selected": accounts.selected.as_ref() == Some(&a.uuid),
                      })).collect::<Vec<_>>(),
                      "offline": accounts.offline.iter().map(|n| serde_json::json!({
-@@ -1331,8 +1358,9 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
+@@ -1331,8 +1357,9 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                  }));
              } else if accounts.accounts.is_empty() && accounts.offline.is_empty() {
                  println!(
@@ -724,7 +827,7 @@ index 7d71084..65cabea 100644
                  );
              } else {
                  for a in &accounts.accounts {
-@@ -1341,7 +1369,11 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
+@@ -1341,7 +1368,11 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                      } else {
                          " "
                      };
@@ -737,7 +840,7 @@ index 7d71084..65cabea 100644
                  }
                  for n in &accounts.offline {
                      let on = accounts.player() == account::Player::Offline(n.clone());
-@@ -1352,9 +1384,6 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
+@@ -1352,9 +1383,6 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                          "Playing offline as the game's own name (`account select NAME` to switch)."
                      );
                  }
@@ -747,7 +850,7 @@ index 7d71084..65cabea 100644
              }
          }
          AccountCmd::SignIn => {
-@@ -1380,6 +1409,44 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
+@@ -1380,6 +1408,44 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
              accounts.save()?;
              println!("Signed out {}.", a.name);
          }
@@ -794,10 +897,10 @@ index 7d71084..65cabea 100644
                  .offline
 diff --git a/launcher/src/ely.rs b/launcher/src/ely.rs
 new file mode 100644
-index 0000000..a46b010
+index 0000000..95d9395
 --- /dev/null
 +++ b/launcher/src/ely.rs
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,361 @@
 +//! Ely.by, and any other authlib (Yggdrasil) server: signing in for the account the game then
 +//! plays with. authlib-injector does this to the Java game at launch; Horizon is native, so the
 +//! launcher signs in itself, keeps the tokens in the OS keychain (never the password) and hands
@@ -943,6 +1046,37 @@ index 0000000..a46b010
 +    let mut bytes = [0u8; 16];
 +    let _ = getrandom::fill(&mut bytes);
 +    bytes.iter().map(|b| format!("{b:02x}")).collect()
++}
++
++/// Where an authlib account's tokens go when there is no keychain: a file only its owner can
++/// read, in the launcher's data folder (`authlib/<uuid>.json`).
++pub fn token_file(uuid: &str) -> std::path::PathBuf {
++    crate::backend::data_dir()
++        .join("authlib")
++        .join(format!("{uuid}.json"))
++}
++
++/// Write that file: 0600 on Unix, created whole. Never the password: only the pair of tokens.
++pub fn keep_token_file(uuid: &str, text: &str) -> Result<(), String> {
++    let path = token_file(uuid);
++    if let Some(dir) = path.parent() {
++        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
++    }
++    let mut options = std::fs::OpenOptions::new();
++    options.write(true).create(true).truncate(true);
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::OpenOptionsExt;
++        options.mode(0o600);
++    }
++    let mut file = options.open(&path).map_err(|e| e.to_string())?;
++    use std::io::Write;
++    file.write_all(text.as_bytes()).map_err(|e| e.to_string())
++}
++
++/// Remove it, when sign-out or a new keychain makes it useless.
++pub fn forget_token_file(uuid: &str) {
++    let _ = std::fs::remove_file(token_file(uuid));
 +}
 +
 +/// The access token of a sign-in answer, else the client token the server kept.
@@ -1130,7 +1264,7 @@ index 0000000..a46b010
 +}
 diff --git a/launcher/src/ely_proxy.rs b/launcher/src/ely_proxy.rs
 new file mode 100644
-index 0000000..97a2094
+index 0000000..7d4c6e6
 --- /dev/null
 +++ b/launcher/src/ely_proxy.rs
 @@ -0,0 +1,234 @@
@@ -1259,7 +1393,7 @@ index 0000000..97a2094
 +}
 +
 +/// The answer for one request: the discovery document, or the server's own answer forwarded.
-+fn route(routes: &Routes, method: &str, path: &str, body: &[u8]) -> (u16, String) {
++fn route(routes: &Routes, _method: &str, path: &str, body: &[u8]) -> (u16, String) {
 +    let Some(rest) = path.strip_prefix(&format!(
 +        "/{}/",
 +        routes.base.rsplit('/').next().unwrap_or_default()
@@ -1767,6 +1901,56 @@ index deb3bae..5391638 100644
                  )
              })
              .collect();
+diff --git a/launcher/tests/owner_gate.rs b/launcher/tests/owner_gate.rs
+index 3a78692..11d7fb8 100644
+--- a/launcher/tests/owner_gate.rs
++++ b/launcher/tests/owner_gate.rs
+@@ -1,5 +1,6 @@
+-//! The owner gate from the outside: with no account that owns Minecraft: Java Edition in the
+-//! launcher, neither `horizon-launcher play` nor the MCP server's play starts the game.
++//! Patched: no owner gate. With no account that owns Minecraft: Java Edition in the launcher,
++//! `horizon-launcher play` and the MCP server's play go on as far as the version's files let
++//! them: they ask for no account, and stop only at an unprepared version (nothing to play yet).
+ use std::io::Write;
+ use std::path::{Path, PathBuf};
+ use std::process::{Command, Output, Stdio};
+@@ -44,13 +45,15 @@ fn text(out: &Output) -> String {
+ }
+ 
+ #[test]
+-fn the_cli_refuses_to_play_without_an_owner() {
++fn the_cli_plays_without_an_owner() {
+     let root = home("cli");
+     let out = launcher(&root, &["play"]).output().unwrap();
+     let said = text(&out);
++    // The files are the only thing in the way now: no account, no sign-in, no owner.
+     assert!(!out.status.success(), "{said}");
+-    assert!(said.contains(REFUSED), "{said}");
+-    assert!(said.contains("horizon-launcher account sign-in"), "{said}");
++    assert!(!said.contains(REFUSED), "{said}");
++    assert!(!said.contains("account sign-in"), "{said}");
++    assert!(said.contains("is not prepared yet"), "{said}");
+     // Nothing of the game ran, and the offline name is still there.
+     assert!(!root.join("game/sessions").exists());
+     let accounts = std::fs::read_to_string(root.join("launcher/accounts.json")).unwrap();
+@@ -59,7 +62,7 @@ fn the_cli_refuses_to_play_without_an_owner() {
+ }
+ 
+ #[test]
+-fn the_mcp_server_refuses_to_play_without_an_owner() {
++fn the_mcp_server_plays_without_an_owner() {
+     let root = home("mcp");
+     let mut child = launcher(&root, &["mcp"])
+         .stdin(Stdio::piped())
+@@ -84,6 +87,7 @@ fn the_mcp_server_refuses_to_play_without_an_owner() {
+         .expect("a reply to play");
+     assert_eq!(reply["result"]["isError"], true, "{reply}");
+     let said = reply["result"]["content"][0]["text"].as_str().unwrap();
+-    assert!(said.contains(REFUSED), "{said}");
++    assert!(!said.contains(REFUSED), "{said}");
++    assert!(said.contains("is not prepared yet"), "{said}");
+     let _ = std::fs::remove_dir_all(&root);
+ }
 -- 
 2.56.0
 

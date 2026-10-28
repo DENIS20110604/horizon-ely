@@ -66,7 +66,7 @@ if [ -z "$binary" ]; then
         command -v gh >/dev/null || die "--download needs the GitHub CLI (gh)"
         say "Downloading the newest release"
         tmp=$(mktemp -d)
-        gh release download --pattern 'horizon-launcher-linux-x86_64.tar.gz' --dir "$tmp"
+        (cd "$root" && gh release download --pattern 'horizon-launcher-linux-x86_64.tar.gz' --dir "$tmp")
         tar xzf "$tmp"/horizon-launcher-linux-x86_64.tar.gz -C "$tmp"
         binary=$tmp/horizon-launcher
     else
