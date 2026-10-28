@@ -58,6 +58,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Git for Windows would check the patch (and the upstream clone) out with CRLF, which
+          # `git apply` reads as trailing whitespace and refuses.
+          git config --global core.autocrlf false
           read -r ref sha < <(grep -v '^[[:space:]]*#' upstream.txt | grep -v '^[[:space:]]*$' | head -1)
           version=$(grep -v '^[[:space:]]*#' version.txt | grep -v '^[[:space:]]*$' | head -1)
           echo "HORIZON_LAUNCHER_VERSION=$version" >> "$GITHUB_ENV"
@@ -69,7 +72,8 @@ jobs:
           }
           for patch in ../../patches/*.patch; do
             echo "applying $(basename "$patch")"
-            git apply "$patch"
+            # Windows checks some files out with CRLF whatever .gitattributes says.
+            git apply --ignore-whitespace "$patch"
           done
 
       - name: Test and build

@@ -1,6 +1,8 @@
 # The upstream checkout and the build, never in the repository.
 .work/
 target/
+# A log a launcher run leaves in the folder it was started from.
+logs/
 # Mojang's files never belong here (nor in any Horizon tree): jars, assets, prepared resources.
 *.jar
 .local/

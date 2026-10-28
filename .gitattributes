@@ -1,0 +1,5 @@
+# The patches are read by `git apply`, which treats a CRLF as trailing whitespace: keep LF
+# wherever Git for Windows' core.autocrlf would otherwise rewrite them.
+*.patch text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf

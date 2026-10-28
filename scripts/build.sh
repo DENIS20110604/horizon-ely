@@ -44,8 +44,8 @@ if [ ${#patches[@]} -eq 0 ]; then
 fi
 for patch in "${patches[@]}"; do
     say "Applying $(basename "$patch")"
-    git apply --check "$patch"
-    git apply "$patch"
+    git apply --check --ignore-whitespace "$patch"
+    git apply --ignore-whitespace "$patch"
 done
 
 say "Building $version (target: $target)"
