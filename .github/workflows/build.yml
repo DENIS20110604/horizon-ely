@@ -1,9 +1,9 @@
 name: build
 
-# Builds the patched launcher for Linux and Windows: a clean checkout of the tag in upstream.txt,
-# the patches in patches/, then the launcher's own tests and a release build. A tag `ely-v*`
-# publishes the two archives as a GitHub release; anything else only builds (and keeps them as
-# run artifacts).
+# Builds the patched programs from a clean checkout of the tag in upstream.txt and the patches in
+# patches/: the launcher (offline play, Ely.by accounts) and the game client (skins). A tag
+# `ely-v*` publishes the archives as a GitHub release; anything else only builds and keeps them
+# as run artifacts.
 on:
   push:
     branches: [main]
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   launcher:
-    name: build ${{ matrix.name }}
+    name: launcher ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -74,7 +74,6 @@ jobs:
           }
           for patch in ../../patches/*.patch; do
             echo "applying $(basename "$patch")"
-            # Windows checks some files out with CRLF whatever .gitattributes says.
             git apply --ignore-whitespace "$patch"
           done
 
@@ -111,9 +110,93 @@ jobs:
           path: dist/${{ matrix.asset }}
           retention-days: 14
 
+  game:
+    name: game ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            asset: horizon-client-linux-x86_64.tar.gz
+            binary: horizon-client
+            rustflags: ''
+          - name: windows
+            os: windows-latest
+            asset: horizon-client-windows-x64.zip
+            binary: horizon-client.exe
+            rustflags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .work/upstream
+
+      - name: ALSA and udev headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+
+      - name: The upstream tag and the patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global core.autocrlf false
+          read -r ref sha < <(grep -v '^[[:space:]]*#' upstream.txt | grep -v '^[[:space:]]*$' | head -1)
+          version=$(grep -v '^[[:space:]]*#' game-version.txt | grep -v '^[[:space:]]*$' | head -1)
+          echo "HORIZON_VERSION=$version" >> "$GITHUB_ENV"
+          rm -rf .work/upstream
+          git clone --depth 1 --branch "$ref" https://github.com/horizon-rust/horizon.git .work/upstream
+          cd .work/upstream
+          test "$(git rev-parse HEAD)" = "$sha" || {
+            echo "::error::upstream.txt pins $sha, $ref is $(git rev-parse HEAD)"
+            exit 1
+          }
+          for patch in ../../patches/*.patch; do
+            echo "applying $(basename "$patch")"
+            git apply --ignore-whitespace "$patch"
+          done
+
+      - name: Test the skin changes and build the client
+        shell: bash
+        working-directory: .work/upstream
+        run: |
+          set -euo pipefail
+          cargo test --release --locked -p horizon-client --lib skins::
+          cargo build --release --locked --features horizon-client/mods \
+            -p horizon-client --bin horizon-client
+
+      - name: Package
+        shell: bash
+        working-directory: .work/upstream
+        run: |
+          set -euo pipefail
+          mkdir -p ../../dist
+          cp "target/release/${{ matrix.binary }}" ../../dist/
+          cd ../../dist
+          case "${{ matrix.asset }}" in
+            *.tar.gz) tar czf "${{ matrix.asset }}" "${{ matrix.binary }}" ;;
+            *.zip) 7z a "${{ matrix.asset }}" "${{ matrix.binary }}" >/dev/null ;;
+          esac
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 14
+
   release:
     if: startsWith(github.ref, 'refs/tags/ely-v')
-    needs: launcher
+    needs: [launcher, game]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -127,4 +210,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --notes "Patched Horizon launcher (${{ github.sha }}). Install with scripts/install.sh --replace PATH, or replace the binary yourself; the launcher keeps its data folder and never updates itself."
+            --notes "Patched Horizon launcher and game client (${{ github.sha }}).
+          Install with scripts/install.sh --download, or --replace PATH for a launcher you already run; the game client goes into the installed version's folder. The launcher keeps its data folder and never updates itself."
