@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
     --download) download=1; shift ;;
     --no-client) with_client=0; shift ;;
     --uninstall) uninstall=1; shift ;;
-    -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
     esac
 done
