@@ -1,0 +1,2 @@
+# The upstream checkout the patches apply to: tag and commit, as `git ls-remote` reports them.
+launcher@0.2.20 b6c936f82b08798057161bdfa577e3aac53fb91e

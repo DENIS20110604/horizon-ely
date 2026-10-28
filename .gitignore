@@ -1,0 +1,7 @@
+# The upstream checkout and the build, never in the repository.
+.work/
+target/
+# Mojang's files never belong here (nor in any Horizon tree): jars, assets, prepared resources.
+*.jar
+.local/
+minecraft/

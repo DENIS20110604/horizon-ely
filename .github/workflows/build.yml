@@ -1,0 +1,124 @@
+name: build
+
+# Builds the patched launcher for Linux and Windows: a clean checkout of the tag in upstream.txt,
+# the patches in patches/, then the launcher's own tests and a release build. A tag `ely-v*`
+# publishes the two archives as a GitHub release; anything else only builds (and keeps them as
+# run artifacts).
+on:
+  push:
+    branches: [main]
+    tags: ['ely-v*']
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  launcher:
+    name: build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-22.04
+            asset: horizon-launcher-linux-x86_64.tar.gz
+            binary: horizon-launcher
+            rustflags: ''
+          - name: windows
+            os: windows-latest
+            asset: horizon-launcher-windows-x64.zip
+            binary: horizon-launcher.exe
+            # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll.
+            rustflags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .work/upstream/launcher
+
+      - name: Linux libraries GPUI links to
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libfontconfig-dev libvulkan-dev libasound2-dev
+
+      - name: The upstream tag and the patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r ref sha < upstream.txt
+          version=$(tr -d '[:space:]' < version.txt)
+          echo "HORIZON_LAUNCHER_VERSION=$version" >> "$GITHUB_ENV"
+          git clone --depth 1 --branch "$ref" https://github.com/horizon-rust/horizon.git .work/upstream
+          cd .work/upstream
+          test "$(git rev-parse HEAD)" = "$sha" || {
+            echo "::error::upstream.txt pins $sha, $ref is $(git rev-parse HEAD)"
+            exit 1
+          }
+          for patch in ../../patches/*.patch; do
+            echo "applying $(basename "$patch")"
+            git apply "$patch"
+          done
+
+      - name: Test and build
+        shell: bash
+        working-directory: .work/upstream/launcher
+        run: |
+          set -euo pipefail
+          cargo test --release --locked
+          cargo build --release --locked
+          ./target/release/${{ matrix.binary }} --version | tee version.txt
+          grep -qx "horizon-launcher $HORIZON_LAUNCHER_VERSION" version.txt || {
+            echo "::error::expected horizon-launcher $HORIZON_LAUNCHER_VERSION"
+            exit 1
+          }
+
+      - name: Package
+        shell: bash
+        working-directory: .work/upstream/launcher
+        run: |
+          set -euo pipefail
+          mkdir -p ../../../dist
+          cp "target/release/${{ matrix.binary }}" ../../../dist/
+          cd ../../../dist
+          case "${{ matrix.asset }}" in
+            *.tar.gz) tar czf "${{ matrix.asset }}" "${{ matrix.binary }}" ;;
+            *.zip) 7z a "${{ matrix.asset }}" "${{ matrix.binary }}" >/dev/null ;;
+          esac
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/ely-v')
+    needs: launcher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Patched Horizon launcher (${{ github.sha }}). Install with scripts/install.sh --replace PATH, or replace the binary yourself; the launcher keeps its data folder and never updates itself."

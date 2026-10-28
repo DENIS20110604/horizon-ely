@@ -1,0 +1,2 @@
+# The patched launcher's version: the upstream launcher version, then this patch series.
+0.2.20-ely1
