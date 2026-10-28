@@ -1,4 +1,4 @@
-From 2e312d6f00bd9c6cdb16a01b29a47ed9ec6a3cc6 Mon Sep 17 00:00:00 2001
+From a050b88c18dffe7eeccabbbe16b18ee7a2373f56 Mon Sep 17 00:00:00 2001
 From: DENIS20110604 <akount.den11@gmail.com>
 Date: Wed, 28 Oct 2026 18:48:07 +0200
 Subject: [PATCH] Offline play and Ely.by accounts
@@ -8,30 +8,76 @@ Subject: [PATCH] Offline play and Ely.by accounts
 - ely_proxy.rs: loopback discovery document forwarding join/verify/profile
 - self-update off (the official update would restore the gate)
 ---
- launcher/lang/ru.json         |  18 +-
+ launcher/lang/fr.json         |  20 ++-
+ launcher/lang/ru.json         |  21 ++-
  launcher/src/account.rs       | 134 ++++++++++++--
  launcher/src/account/tests.rs |  54 ++++--
  launcher/src/backend.rs       | 103 +++++------
  launcher/src/cli.rs           |  91 ++++++++--
- launcher/src/ely.rs           | 327 ++++++++++++++++++++++++++++++++++
+ launcher/src/ely.rs           | 330 ++++++++++++++++++++++++++++++++++
  launcher/src/ely_proxy.rs     | 234 ++++++++++++++++++++++++
  launcher/src/lib.rs           |   2 +
  launcher/src/main.rs          | 140 ++++++++++++---
  launcher/src/owner_page.rs    |  10 +-
  launcher/src/servers_page.rs  |  22 ++-
  launcher/src/switch_page.rs   |  19 +-
- 12 files changed, 1008 insertions(+), 146 deletions(-)
+ 13 files changed, 1028 insertions(+), 152 deletions(-)
  create mode 100644 launcher/src/ely.rs
  create mode 100644 launcher/src/ely_proxy.rs
 
+diff --git a/launcher/lang/fr.json b/launcher/lang/fr.json
+index a853249..7ec0e4f 100644
+--- a/launcher/lang/fr.json
++++ b/launcher/lang/fr.json
+@@ -105,7 +105,6 @@
+   "Minecraft folder": "Dossier Minecraft",
+   "Choose…": "Choisir…",
+   "Playing offline": "Jeu hors ligne",
+-  "Online servers need a Microsoft account.": "Les serveurs en ligne demandent un compte Microsoft.",
+   "Accounts…": "Comptes…",
+   "The first preparation takes a few minutes.": "La première préparation prend quelques minutes.",
+   "Horizon crashed": "Horizon a planté",
+@@ -174,7 +173,20 @@
+   "Open {link} in your browser and enter this code:": "Ouvrez {link} dans votre navigateur et entrez ce code :",
+   "From my install": "Depuis mon installation",
+   "Download and prepare": "Télécharger et préparer",
+-  "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.": "Pas préparé. Horizon peut télécharger Minecraft {version} depuis Mojang pour votre compte, ou utiliser votre propre installation.",
+-  "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.": "Pas préparé. Connectez-vous d'abord avec le compte Microsoft qui possède Minecraft {version}.",
+-  "Cancel": "Annuler"
++  "Cancel": "Annuler",
++  "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.": "Pas encore préparé. Horizon peut télécharger Minecraft {version} depuis Mojang, ou utiliser votre installation.",
++  "Optional: sign in with Microsoft to play online servers with your own name and skin.": "Facultatif : connectez-vous avec Microsoft pour jouer en ligne avec votre nom et votre skin.",
++  "An Ely.by or Microsoft account plays on online servers.": "Un compte Ely.by ou Microsoft joue sur les serveurs en ligne.",
++  "Type your Ely.by login and password.": "Saisissez votre identifiant et votre mot de passe Ely.by.",
++  "Your Ely.by name and skin, on Ely.by servers. The password is used once and not kept; the tokens stay in the keychain.": "Votre nom et votre skin Ely.by, sur les serveurs Ely.by. Le mot de passe sert une fois et n'est pas conservé ; seuls les jetons restent dans le trousseau.",
++  "Sign in here to play as yourself on Ely.by servers, or on another authlib server: give its address in the first field.": "Connectez-vous ici pour jouer sous votre nom sur les serveurs Ely.by, ou sur un autre serveur authlib : son adresse va dans le premier champ.",
++  "Ely.by": "Ely.by",
++  "Ely.by account": "Compte Ely.by",
++  "Ely.by account · plays": "Compte Ely.by · joue",
++  "Ely.by account · signed in": "Compte Ely.by · connecté",
++  "Signing in…": "Connexion…",
++  "Nickname or e-mail": "Pseudo ou e-mail",
++  "Password": "Mot de passe",
++  "2FA code (if on)": "Code 2FA (si activé)",
++  "This account has two-factor authentication: enter the code from your app in the 2FA field and sign in again.": "Ce compte a la double authentification : saisissez le code de votre application dans le champ 2FA et reconnectez-vous."
+ }
 diff --git a/launcher/lang/ru.json b/launcher/lang/ru.json
-index 9fa58b9..bc6a3fd 100644
+index 9fa58b9..24aeed9 100644
 --- a/launcher/lang/ru.json
 +++ b/launcher/lang/ru.json
-@@ -175,6 +175,20 @@
+@@ -105,7 +105,6 @@
+   "Minecraft folder": "Папка Minecraft",
+   "Choose…": "Выбрать…",
+   "Playing offline": "Игра офлайн",
+-  "Online servers need a Microsoft account.": "Для онлайн-серверов нужен аккаунт Microsoft.",
+   "Accounts…": "Аккаунты…",
+   "The first preparation takes a few minutes.": "Первая подготовка занимает несколько минут.",
+   "Horizon crashed": "Horizon вылетел",
+@@ -174,7 +173,21 @@
+   "Open {link} in your browser and enter this code:": "Откройте {link} в браузере и введите этот код:",
    "From my install": "Из моей установки",
    "Download and prepare": "Скачать и подготовить",
-   "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.": "Не подготовлено. Horizon может скачать Minecraft {version} у Mojang для вашего аккаунта или взять вашу установку.",
+-  "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.": "Не подготовлено. Horizon может скачать Minecraft {version} у Mojang для вашего аккаунта или взять вашу установку.",
 -  "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.": "Не подготовлено. Сначала войдите в аккаунт Microsoft, у которого есть Minecraft {version}.",
 -  "Cancel": "Отмена"
 +  "Cancel": "Отмена",
@@ -49,7 +95,8 @@ index 9fa58b9..bc6a3fd 100644
 +  "Ely.by account · signed in": "Аккаунт Ely.by · выполнен вход",
 +  "Optional: sign in with Microsoft to play online servers with your own name and skin.": "Необязательно: войдите в Microsoft, чтобы играть на онлайн-серверах со своим именем и скином.",
 +  "An Ely.by or Microsoft account plays on online servers.": "На онлайн-серверах играют с аккаунтом Ely.by или Microsoft.",
-+  "Ely.by account": "Аккаунт Ely.by"
++  "Ely.by account": "Аккаунт Ely.by",
++  "This account has two-factor authentication: enter the code from your app in the 2FA field and sign in again.": "У аккаунта включена двухфакторная аутентификация: введите код из приложения в поле 2FA и войдите снова."
  }
 diff --git a/launcher/src/account.rs b/launcher/src/account.rs
 index 6f6ae39..ee62b62 100644
@@ -410,7 +457,7 @@ index 7985a49..2663075 100644
          selected: Some("abc".into()),
          ..Accounts::default()
 diff --git a/launcher/src/backend.rs b/launcher/src/backend.rs
-index 4e2a1b1..143bae8 100644
+index 4e2a1b1..ced73e7 100644
 --- a/launcher/src/backend.rs
 +++ b/launcher/src/backend.rs
 @@ -1195,57 +1195,24 @@ fn preparer_binary(dir: &Path) -> Option<PathBuf> {
@@ -538,21 +585,21 @@ index 4e2a1b1..143bae8 100644
      Ok(cmd)
  }
  
-@@ -2094,7 +2076,13 @@ fn releases_and_updates_with(
-     on_releases(Ok(releases));
-     Ok(Updates {
-         horizon,
--        launcher: launcher_update(&launchers(&list)),
-+        // Patched: this build never replaces itself, so an official launcher release is not
-+        // offered (installing it would put the owner gate back).
-+        launcher: if self_update_allowed() {
-+            launcher_update(&launchers(&list))
-+        } else {
-+            None
-+        },
-     })
+@@ -2100,7 +2082,13 @@ fn releases_and_updates_with(
+ 
+ /// A fresh release-list request for both kinds of update (plus older-launcher fallback if needed).
+ pub fn check_updates() -> Result<Updates, String> {
+-    releases_and_updates(|_| {})
++    let mut updates = releases_and_updates(|_| {})?;
++    // Patched: this build never replaces itself, so an official launcher release is not offered
++    // (installing it would put the owner gate back).
++    if !self_update_allowed() {
++        updates.launcher = None;
++    }
++    Ok(updates)
  }
  
+ /// Whether a version installed as an update becomes the selected one: only when the player was
 @@ -2146,9 +2134,11 @@ pub fn exe_path() -> &'static Path {
      EXE.get_or_init(|| std::env::current_exe().unwrap_or_else(|_| PathBuf::from(LAUNCHER_BINARY)))
  }
@@ -747,10 +794,10 @@ index 7d71084..65cabea 100644
                  .offline
 diff --git a/launcher/src/ely.rs b/launcher/src/ely.rs
 new file mode 100644
-index 0000000..62abfb7
+index 0000000..a46b010
 --- /dev/null
 +++ b/launcher/src/ely.rs
-@@ -0,0 +1,327 @@
+@@ -0,0 +1,330 @@
 +//! Ely.by, and any other authlib (Yggdrasil) server: signing in for the account the game then
 +//! plays with. authlib-injector does this to the Java game at launch; Horizon is native, so the
 +//! launcher signs in itself, keeps the tokens in the OS keychain (never the password) and hands
@@ -769,6 +816,9 @@ index 0000000..62abfb7
 +/// The error Ely.by answers when the account has two-factor authentication on: the player enters
 +/// the code from their app, and the password goes as `password:code`.
 +pub const TWO_FACTOR: &str = "Account protected with two factor auth.";
++/// What the launcher shows instead: where to put the code.
++pub const TWO_FACTOR_HELP: &str = "This account has two-factor authentication: enter the code \
++     from your app in the 2FA field and sign in again.";
 +/// What plays without a session when the tokens are gone and can't be renewed.
 +pub const SIGN_IN_AGAIN: &str = "This Ely.by account is not signed in any more. Sign in again.";
 +
@@ -832,8 +882,8 @@ index 0000000..62abfb7
 +    let v: Value = serde_json::from_str(body).ok()?;
 +    let message = v.get("errorMessage").and_then(Value::as_str)?;
 +    Some(if message == TWO_FACTOR {
-+        // The caller asks for the code; keep the server's own words out of the way.
-+        TWO_FACTOR.to_owned()
++        // Where to put the code, rather than the server's words.
++        TWO_FACTOR_HELP.to_owned()
 +    } else {
 +        message.to_owned()
 +    })
@@ -1074,7 +1124,7 @@ index 0000000..62abfb7
 +                r#"{"error":"ForbiddenOperationException","errorMessage":"Account protected with two factor auth."}"#
 +            )
 +            .as_deref(),
-+            Some(TWO_FACTOR)
++            Some(TWO_FACTOR_HELP)
 +        );
 +    }
 +}

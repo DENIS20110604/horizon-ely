@@ -11,7 +11,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 read -r ref sha <<<"$(grep -v '^[[:space:]]*#' "$root/upstream.txt" | grep -v '^[[:space:]]*$' | head -1)"
-version=$(tr -d '[:space:]' <"$root/version.txt")
+version=$(grep -v '^[[:space:]]*#' "$root/version.txt" | grep -v '^[[:space:]]*$' | head -1)
 work=${WORK:-$root/.work}
 src=$work/upstream
 target=${CARGO_TARGET_DIR:-$work/target}

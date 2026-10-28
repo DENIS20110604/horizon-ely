@@ -12,7 +12,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-version=$(tr -d '[:space:]' <"$root/version.txt")
+version=$(grep -v '^[[:space:]]*#' "$root/version.txt" | grep -v '^[[:space:]]*$' | head -1)
 work=${WORK:-$root/.work}
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
