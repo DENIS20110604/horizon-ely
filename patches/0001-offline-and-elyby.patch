@@ -1,4 +1,4 @@
-From c8995612c9c117cafd64f0853d0ff71069419d88 Mon Sep 17 00:00:00 2001
+From fbe888f210bb211e17dc60524f2e0e738e9d4595 Mon Sep 17 00:00:00 2001
 From: DENIS20110604 <akount.den11@gmail.com>
 Date: Wed, 28 Oct 2026 18:48:07 +0200
 Subject: [PATCH] Offline play and Ely.by accounts
@@ -10,6 +10,7 @@ Subject: [PATCH] Offline play and Ely.by accounts
 ---
  crates/horizon-client/src/game/perspective.rs |  19 +
  crates/horizon-client/src/game/remote.rs      |   9 +-
+ crates/horizon-client/src/gfx.rs              |  18 +-
  crates/horizon-client/src/skins.rs            | 132 +++++-
  docs/launcher-commands.md                     |  30 +-
  launcher/lang/fr.json                         |  20 +-
@@ -26,7 +27,7 @@ Subject: [PATCH] Offline play and Ely.by accounts
  launcher/src/servers_page.rs                  |  22 +-
  launcher/src/switch_page.rs                   |  19 +-
  launcher/tests/owner_gate.rs                  |  18 +-
- 18 files changed, 1295 insertions(+), 175 deletions(-)
+ 19 files changed, 1309 insertions(+), 179 deletions(-)
  create mode 100644 launcher/src/ely.rs
  create mode 100644 launcher/src/ely_proxy.rs
 
@@ -81,6 +82,49 @@ index 22b7c13..b347d9b 100644
          let auth = horizon_client::auth::current()?;
          let state = self
              .skin_profiles
+diff --git a/crates/horizon-client/src/gfx.rs b/crates/horizon-client/src/gfx.rs
+index beb8b90..83c13a0 100644
+--- a/crates/horizon-client/src/gfx.rs
++++ b/crates/horizon-client/src/gfx.rs
+@@ -762,8 +762,18 @@ fn mip_chain(
+ /// pass is also what passes each draw's first instance to shaders reading
+ /// `instance_index`, and DirectX 12 is the fallback, where working matters
+ /// more than CPU time.
+-fn instance_descriptor(backends: wgpu::Backends) -> wgpu::InstanceDescriptor {
+-    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
++fn instance_descriptor(
++    backends: wgpu::Backends,
++    window: Option<&Arc<Window>>,
++) -> wgpu::InstanceDescriptor {
++    // Patched: the display handle lets EGL pick the window's own platform (Wayland or X11) for
++    // the GL backend. Without it EGL opens the surfaceless platform, every window surface then
++    // has no usable format, and a machine whose GPU has no Vulkan driver (Intel Ivy Bridge, say)
++    // can't start the game at all.
++    let mut descriptor = match window {
++        Some(window) => wgpu::InstanceDescriptor::new_with_display_handle(Box::new(window.clone())),
++        None => wgpu::InstanceDescriptor::new_without_display_handle(),
++    };
+     descriptor.backends = backends.with_env();
+     let dx12 = cfg!(windows) && descriptor.backends.contains(wgpu::Backends::DX12);
+     if !cfg!(debug_assertions) && !dx12 {
+@@ -887,7 +897,7 @@ async fn open_device(
+         if attempt > 0 {
+             log::warn!("Horizon renderer: trying {name} ({})", failures.join("; "));
+         }
+-        let instance = wgpu::Instance::new(instance_descriptor(backends));
++        let instance = wgpu::Instance::new(instance_descriptor(backends, Some(window)));
+         let surface = if offscreen {
+             None
+         } else {
+@@ -5684,7 +5694,7 @@ mod tests {
+     #[test]
+     fn indirect_draws_are_validated_only_in_debug_builds_and_on_directx_12() {
+         let validated = |backends| {
+-            super::instance_descriptor(backends)
++            super::instance_descriptor(backends, None)
+                 .flags
+                 .contains(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL)
+         };
 diff --git a/crates/horizon-client/src/skins.rs b/crates/horizon-client/src/skins.rs
 index 0393e75..b288246 100644
 --- a/crates/horizon-client/src/skins.rs
